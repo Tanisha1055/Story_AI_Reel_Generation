@@ -1,0 +1,9 @@
+{
+    // 1. Point Pylance directly to your Python executable
+    "python.defaultInterpreterPath": "./myvenv/Scripts/python.exe",
+
+    // 2. Ensure Pylance can resolve dependencies installed in the environment
+    "python.analysis.extraPaths": ["./myvenv/Lib/site-packages"],
+
+    // ... other settings ...
+}

@@ -1,0 +1,25 @@
+
+# --- General Settings ---
+theme: "Ancient Lost Temple Discovery" # Default theme
+reel_length_seconds: 45
+scene_duration_seconds: 7
+num_scenes: 6
+
+# --- API Endpoints (PLACEHOLDERS) ---
+# NOTE: Replace 'YOUR_MODEL_ENDPOINT_HERE' with the actual URLs provided.
+
+# Google Gemini (We use the SDK, so the endpoint is abstract)
+gemini_model_name: "gemini-2.5-flash"
+
+# Minimax/Image-01 for Character/Setting
+minimax_endpoint: "https://api.minimax.example/v1/image/generate"
+
+# flux-kontext-apps/multi-image-kontext-pro for Composition
+kontext_pro_endpoint: "https://api.kontext-pro.example/v1/compose"
+
+# Bytedance/seedance-1-pro for Video Generation
+seedance_endpoint: "https://api.seedance.example/v1/video/generate"
+
+# --- Output Paths ---
+output_dir: "data"
+final_reel_name: "generated_reel.mp4"

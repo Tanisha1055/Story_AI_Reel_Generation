@@ -1,0 +1,6 @@
+google-genai
+requests
+pyyaml
+moviepy
+Pillow
+python-dotenv  
