@@ -4,10 +4,17 @@ import json
 import requests
 from google import genai
 from google.genai import types
+from moviepy.video import fx as vfx
+from PIL import Image, ImageDraw # Used only for fallback mock image
+import requests
+import base64
+import time
+from typing import Dict, Any, Optional
 
 # --- Authentication and Setup ---
 # The keys are retrieved from environment variables
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
+HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
 def get_gemini_client():
     """Initializes the Gemini client."""
@@ -18,11 +25,15 @@ def get_gemini_client():
 
 # --- STAGE 1 & 2: Story and Prompt Generation (Gemini) ---
 
-def generate_story_json(client, config, theme):
-    """Generates a structured story and detailed visual prompts using Gemini."""
+def generate_story_json(client: genai.Client, config: Dict[str, Any], theme: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+    """
+    Generates a structured story and detailed visual prompts using Gemini.
+    Includes a retry mechanism to handle partial or malformed JSON responses.
+    """
     model = config['gemini_model_name']
     num_scenes = config['num_scenes']
     
+    # --- Prompt Definition ---
     prompt = f"""
     Generate a short story for a {config['reel_length_seconds']}-second video reel based on the theme '{theme}'. 
     The story must be exactly {num_scenes} scenes. For each scene, provide:
@@ -50,116 +61,75 @@ def generate_story_json(client, config, theme):
     
     print(f"Calling Gemini for Story Generation (Theme: {theme})...")
     
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json")
-    )
+    # --- Retry Loop Implementation ---
+    for attempt in range(max_retries):
+        try:
+            # 1. Generate content from Gemini
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
+            )
+            
+            # 2. Parse the JSON response
+            story_data = json.loads(response.text)
+            
+            # Success
+            print("Story generated successfully.")
+            return story_data
+        
+        except json.JSONDecodeError:
+            # Error handling for truncated or invalid JSON
+            print(f"Error: Gemini did not return valid JSON on attempt {attempt + 1}/{max_retries}.")
+            print("Raw Response (Partial):", response.text[:200])
+            
+            if attempt + 1 == max_retries:
+                print("All retries failed. Returning None.")
+                return None 
+            
+            # Wait 2 seconds before retrying
+            time.sleep(2) 
+
+    # Should be unreachable if max_retries > 0
+    return None
+
+def generate_scene_image(prompt: str, scene_num: int, output_dir: str) -> str:
+    """Generates an image using the Stable Diffusion API via Hugging Face."""
+    print(f"Calling Stable Diffusion for Scene {scene_num}...")
+
+    # Configuration for the Stable Diffusion model
+    HF_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+    
+    # Get token securely from the environment
+    HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+
+    if not HF_TOKEN:
+        raise ValueError("HUGGINGFACE_TOKEN not found. Please set it in your .env file.")
+
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    
+    # The payload structure often needs a few parameters for better generation
+    payload = {
+        "inputs": prompt,
+        "options": {"wait_for_model": True} # Important: Wait if the model is loading
+    }
 
     try:
-        story_data = json.loads(response.text)
-        print("Story generated successfully.")
-        return story_data
-    except json.JSONDecodeError:
-        print("Error: Gemini did not return valid JSON.")
-        print("Raw Response:", response.text[:200])
-        return None
-
-# --- STAGE 3: Asset Generation (Minimax/Image-01 - PLACEHOLDER) ---
-
-def generate_scene_assets(config, scene_id, char_prompt, setting_prompt, output_dir):
-    """Generates character and setting images via Minimax API."""
-    print(f"Generating assets for Scene {scene_id}...")
-    
-    MINIMAX_KEY = os.environ.get("MINIMAX_KEY")
-    if not MINIMAX_KEY:
-        raise ValueError("MINIMAX_KEY environment variable not set.")
-
-    endpoint = config['minimax_endpoint']
-    
-    # *** PLACEHOLDER for Minimax API CALL ***
-    # In a real scenario, you'd make two separate calls here (or one if the API supports batch).
-    
-    # 1. Character Generation
-    char_filename = os.path.join(output_dir, f"scene_{scene_id}_char.png")
-    # response = requests.post(endpoint, json={'prompt': char_prompt, 'key': MINIMAX_KEY, ...})
-    # with open(char_filename, 'wb') as f:
-    #     f.write(response.content) 
-
-    # 2. Setting Generation
-    setting_filename = os.path.join(output_dir, f"scene_{scene_id}_setting.png")
-    # response = requests.post(endpoint, json={'prompt': setting_prompt, 'key': MINIMAX_KEY, ...})
-    # with open(setting_filename, 'wb') as f:
-    #     f.write(response.content) 
-
-    # --- MOCK ASSET CREATION (FOR DEMO/TESTING ONLY) ---
-    # Since we can't call Minimax, we create dummy files (requires Pillow)
-    from PIL import Image, ImageDraw
-    Image.new('RGB', (512, 512), color = 'red').save(char_filename)
-    Image.new('RGB', (512, 512), color = 'blue').save(setting_filename)
-    
-    print(f"Mock assets saved: {char_filename}, {setting_filename}")
-    return char_filename, setting_filename
-
-# --- STAGE 4: Scene Frame Creation (Kontext-Pro - PLACEHOLDER) ---
-
-def combine_assets_to_frame(config, scene_id, char_img_path, setting_img_path):
-    """Combines character and setting into a cohesive frame using Kontext-Pro."""
-    print(f"Composing frame for Scene {scene_id}...")
-    
-    KONTEXT_PRO_KEY = os.environ.get("KONTEXT_PRO_KEY")
-    if not KONTEXT_PRO_KEY:
-        raise ValueError("KONTEXT_PRO_KEY environment variable not set.")
-    
-    endpoint = config['kontext_pro_endpoint']
-    frame_filename = os.path.join(config['output_dir'], f"scene_{scene_id}_frame.png")
-
-    # *** PLACEHOLDER for Kontext-Pro API CALL ***
-    # You would typically upload these files or pass their URLs to the API.
-    # prompt = "Overlay the character realistically onto the setting, preserving lighting."
-    # data = {'character': char_img_path, 'setting': setting_img_path, 'prompt': prompt, 'key': KONTEXT_PRO_KEY, ...}
-    # response = requests.post(endpoint, files=data)
-    # with open(frame_filename, 'wb') as f:
-    #     f.write(response.content) 
-
-    # --- MOCK FRAME CREATION (FOR DEMO/TESTING ONLY) ---
-    from PIL import Image
-    char = Image.open(char_img_path).convert("RGBA")
-    setting = Image.open(setting_img_path).convert("RGBA")
-    setting.paste(char, (100, 100), char) # Simple paste for mock
-    setting.convert('RGB').save(frame_filename)
-
-    print(f"Mock frame saved: {frame_filename}")
-    return frame_filename
-
-# --- STAGE 5: Video Clip Generation (Seedance-1-Pro - PLACEHOLDER) ---
-
-def generate_video_clip(config, scene_id, frame_path, motion_prompt):
-    """Generates a video clip from a static frame using Seedance API."""
-    print(f"Generating video clip for Scene {scene_id}...")
-    
-    SEEDANCE_KEY = os.environ.get("SEEDANCE_KEY")
-    if not SEEDANCE_KEY:
-        raise ValueError("SEEDANCE_KEY environment variable not set.")
+        response = requests.post(HF_API_URL, headers=headers, json=payload)
+        response.raise_for_status() # Raises an HTTPError for bad responses (4xx or 5xx)
         
-    endpoint = config['seedance_endpoint']
-    duration = config['scene_duration_seconds']
-    clip_filename = os.path.join(config['output_dir'], f"scene_{scene_id}_clip.mp4")
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"HuggingFace API Request Failed: {e}")
 
-    # *** PLACEHOLDER for Seedance API CALL ***
-    # data = {'image_url': frame_path, 'prompt': motion_prompt, 'duration': duration, 'key': SEEDANCE_KEY, ...}
-    # response = requests.post(endpoint, json=data)
-    # with open(clip_filename, 'wb') as f:
-    #     f.write(response.content) 
+    # The response content is the raw image data (e.g., JPEG or PNG)
+    image_data = response.content
+    frame_filename = f"{output_dir}/scene_{scene_num}.png"
     
-    # --- MOCK VIDEO CREATION (REQUIRES MOVIEPY - FOR DEMO/TESTING ONLY) ---
-    from moviepy import ImageClip
-    # Create a simple clip from the static frame for demonstration
-    clip = ImageClip(frame_path, duration=duration)
-    clip.write_videofile(clip_filename, fps=24, logger=None)
-    
-    print(f"Mock video clip saved: {clip_filename}")
-    return clip_filename
+    with open(frame_filename, "wb") as f:
+        f.write(image_data)
+
+    print(f"Scene {scene_num} image saved successfully as {frame_filename}")
+    return frame_filename
 
 # --- Auxiliary Function for Posting Metadata ---
 
