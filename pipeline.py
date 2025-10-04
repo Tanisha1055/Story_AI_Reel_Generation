@@ -1,3 +1,4 @@
+
 import argparse
 import os
 from dotenv import load_dotenv
@@ -15,22 +16,17 @@ def main(theme=None):
     Executes the end-to-end automation pipeline.
     """
     config = load_config()
-    # output_dir needs to be available for the generator.generate_scene_image call
     output_dir = setup_directories(config) 
     
-    # Override theme if provided via command line
     if theme:
         config['theme'] = theme
     
-    # --- CHANGE 1: REMOVED GEMINI IMAGE MODEL SETTING ---
-    # config['image_generation_model'] = 'imagen-3.0-generate-002' 
-            
     print("\n--- Starting AI Reel Generation Pipeline ---")
     print(f"Theme: {config['theme']}")
+    print(f"Video Model: {config['video_generation_model_name']}") # NEW: Print the T2V model
     print("-" * 40)
     
     try:
-        # Initialize Gemini Client (still needed for generate_story_json and generate_caption_and_hashtags)
         gemini_client = generator.get_gemini_client()
 
         # --- STAGE 1 & 2: Story and Prompt Generation ---
@@ -44,21 +40,22 @@ def main(theme=None):
             scene_id = i + 1
             print(f"\n[SCENE {scene_id}/{config['num_scenes']}] Processing...")
             
-            # --- CONSOLIDATED STAGE: Generate Frame using Hugging Face Stable Diffusion ---
-            # 1. Combine prompts into a single string
-            full_prompt = f"{scene['character_prompt']} {scene['setting_prompt']}"
+            # --- CONSOLIDATED STAGE: Generate DYNAMIC Video Clip using Hugging Face T2V ---
+            full_prompt = f"{scene['character_prompt']}, {scene['setting_prompt']}, {scene['motion_prompt']}, high-quality, cinematic, real-time action"
             
-            # 2. CHANGE 2: Updated function call signature for the Hugging Face implementation
-            scene_frame_path = generator.generate_scene_image(
-                full_prompt, # Prompt is the first argument
-                scene_id,     # Scene number/ID
-                output_dir    # Output directory for saving the image
+            # CHANGE: Call the new T2V function
+            scene_video_path = generator.generate_scene_video(
+                full_prompt, 
+                scene_id,   
+                output_dir, 
+                config
             )
             
-            # 💡 CONSOLIDATED STAGE: Generate Dynamic Video Clip using MoviePy
-            clip_path = media_processor.generate_dynamic_video_clip(
-                config, scene_id, scene_frame_path, scene['motion_prompt']
+            # 💡 CONSOLIDATED STAGE: Post-process (e.g., duration check)
+            clip_path = media_processor.process_scene_clip(
+                config, scene_id, scene_video_path, scene['motion_prompt']
             )
+            
             final_clip_paths.append(clip_path) 
 
         # --- STAGE 6.1: Final Reel Assembly (MoviePy) ---

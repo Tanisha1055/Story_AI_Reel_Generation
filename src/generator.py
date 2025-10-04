@@ -1,154 +1,150 @@
 
 import os
 import json
-import requests
 from google import genai
 from google.genai import types
-from moviepy.video import fx as vfx
-from PIL import Image, ImageDraw # Used only for fallback mock image
-import requests
-import base64
 import time
 from typing import Dict, Any, Optional
+from moviepy import ColorClip # Correct import for moviepy
 
 # --- Authentication and Setup ---
-# The keys are retrieved from environment variables
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
 def get_gemini_client():
     """Initializes the Gemini client."""
     if not GEMINI_KEY:
         raise ValueError("GEMINI_API_KEY environment variable not set.")
-    # The client will automatically pick up the GEMINI_API_KEY
     return genai.Client()
 
-# --- STAGE 1 & 2: Story and Prompt Generation (Gemini) ---
-
+# 🟢 MISSING FUNCTION 1: Story Generation (Calls Gemini for structured JSON)
 def generate_story_json(client: genai.Client, config: Dict[str, Any], theme: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
-    """
-    Generates a structured story and detailed visual prompts using Gemini.
-    Includes a retry mechanism to handle partial or malformed JSON responses.
-    """
+    """Generates the structured story plan using the Gemini model."""
     model = config['gemini_model_name']
     num_scenes = config['num_scenes']
     
-    # --- Prompt Definition ---
     prompt = f"""
     Generate a short story for a {config['reel_length_seconds']}-second video reel based on the theme '{theme}'. 
-    The story must be exactly {num_scenes} scenes. For each scene, provide:
-    1. 'narration': A short line of dialogue or narration.
-    2. 'character_prompt': A highly detailed, professional text-to-image prompt (e.g., cinematic, 8k, photorealistic) describing the main character for that specific scene. Ensure consistency across scenes.
-    3. 'setting_prompt': A highly detailed, professional text-to-image prompt describing the background and environment.
-    4. 'motion_prompt': A short instruction for the video model (e.g., 'Slow zoom on the character's face', 'Gentle camera pan left', 'Slight handheld shake').
+    The story must be divided into exactly {num_scenes} scenes. Each scene should have a clear visual focus for video generation.
     
     Output only a JSON object following this exact schema:
     {{
-        "title": "...",
+        "title": "A short, engaging title",
         "theme": "{theme}",
         "scenes": [
             {{
-                "id": 1,
-                "narration": "...",
-                "character_prompt": "...",
-                "setting_prompt": "...",
-                "motion_prompt": "..."
+                "description": "Short narrative for the scene.",
+                "character_prompt": "Detailed description of the main character/subject for T2V.",
+                "setting_prompt": "Detailed cinematic setting (e.g., 'foggy ancient forest, golden hour lighting').",
+                "motion_prompt": "Camera movement or subject action (e.g., 'cinematic crane shot, slow pan to the left')."
             }},
-            # ... up to {num_scenes} scenes
+            // ... repeat for {num_scenes} total scenes
         ]
     }}
     """
     
     print(f"Calling Gemini for Story Generation (Theme: {theme})...")
     
-    # --- Retry Loop Implementation ---
     for attempt in range(max_retries):
         try:
-            # 1. Generate content from Gemini
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            
-            # 2. Parse the JSON response
             story_data = json.loads(response.text)
-            
-            # Success
             print("Story generated successfully.")
             return story_data
-        
+            
         except json.JSONDecodeError:
-            # Error handling for truncated or invalid JSON
             print(f"Error: Gemini did not return valid JSON on attempt {attempt + 1}/{max_retries}.")
-            print("Raw Response (Partial):", response.text[:200])
-            
-            if attempt + 1 == max_retries:
-                print("All retries failed. Returning None.")
-                return None 
-            
-            # Wait 2 seconds before retrying
-            time.sleep(2) 
-
-    # Should be unreachable if max_retries > 0
+            time.sleep(2)  
     return None
 
-def generate_scene_image(prompt: str, scene_num: int, output_dir: str) -> str:
-    """Generates an image using the Stable Diffusion API via Hugging Face."""
-    print(f"Calling Stable Diffusion for Scene {scene_num}...")
 
-    # Configuration for the Stable Diffusion model
-    HF_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+# 🟢 STAGE 3: Video Generation (Google Veo 3 via Gemini API)
+def generate_scene_video(prompt: str, scene_num: int, output_dir: str, config: Dict[str, Any]) -> str:
+    """
+    Generates a video clip using Google Veo 3 via the Gemini API.
+    This is an asynchronous operation that requires polling.
+    """
+    print(f"Calling Google Veo 3 API for Scene {scene_num}...")
+
+    client = get_gemini_client()
+    model_name = config['video_generation_model_name']
+    scene_duration = config.get('scene_duration_seconds', 7)
     
-    # Get token securely from the environment
-    HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+    # Veo 3 currently supports 4, 6, or 8 seconds. 
+    if scene_duration <= 4:
+        veo_duration = 4
+    elif scene_duration <= 6:
+        veo_duration = 6
+    else:
+        veo_duration = 8
 
-    if not HF_TOKEN:
-        raise ValueError("HUGGINGFACE_TOKEN not found. Please set it in your .env file.")
-
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    
-    # The payload structure often needs a few parameters for better generation
-    payload = {
-        "inputs": prompt,
-        "options": {"wait_for_model": True} # Important: Wait if the model is loading
-    }
+    video_filename = os.path.join(output_dir, f"scene_{scene_num}_clip.mp4")
 
     try:
-        response = requests.post(HF_API_URL, headers=headers, json=payload)
-        response.raise_for_status() # Raises an HTTPError for bad responses (4xx or 5xx)
-        
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"HuggingFace API Request Failed: {e}")
+        # STEP 1: Start the asynchronous video generation operation
+        operation = client.models.generate_videos(
+            model=model_name,
+            prompt=prompt,
+            config=types.GenerateVideosConfig(
+                resolution="1080p",
+            ),
+        )
 
-    # The response content is the raw image data (e.g., JPEG or PNG)
-    image_data = response.content
-    frame_filename = f"{output_dir}/scene_{scene_num}.png"
-    
-    with open(frame_filename, "wb") as f:
-        f.write(image_data)
+        # STEP 2: Poll the operation status until the video is done
+        max_wait_time = 300
+        start_time = time.time()
+        while not operation.done and (time.time() - start_time) < max_wait_time:
+            print(f"Waiting for Veo 3 video (Scene {scene_num})... Elapsed: {int(time.time() - start_time)}s")
+            time.sleep(20)
+            operation = client.operations.get(operation)
 
-    print(f"Scene {scene_num} image saved successfully as {frame_filename}")
-    return frame_filename
+        if not operation.done:
+            print(f"Veo 3 operation timed out after {max_wait_time}s.")
+            raise TimeoutError("Veo 3 generation timed out.")
 
-# --- Auxiliary Function for Posting Metadata ---
+        # STEP 3: Download the generated video file
+        generated_video = operation.result.generated_videos[0]
+        client.files.download(file=generated_video.video, download_path=video_filename)
 
-def generate_caption_and_hashtags(client, config, story_data):
-    """Generates a social media-friendly caption and relevant hashtags."""
+        print(f"Scene {scene_num} VEO 3 video saved successfully as {video_filename}")
+        return video_filename
+
+    except Exception as e:
+        print(f"❌ ERROR with Google Veo 3 API for scene {scene_num}. Error: {e}")
+        # FALLBACK: Create a mock video on failure
+        mock_filename = os.path.join(output_dir, f"scene_{scene_num}_MOCK.mp4")
+        print(f"Generating mock video clip due to API error: {mock_filename}")
+        clip = ColorClip((1920, 1080), color=(0, 0, 255), duration=scene_duration)
+        clip.write_videofile(mock_filename, fps=24, logger=None)
+        return mock_filename
+
+# 🟢 MISSING FUNCTION 2: Caption Generation
+def generate_caption_and_hashtags(client: genai.Client, config: Dict[str, Any], story_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Generates social media caption and hashtags using the Gemini model."""
+    model = config['gemini_model_name']
     prompt = f"""
     Based on the story titled '{story_data['title']}' with the theme '{story_data['theme']}', 
     generate a compelling social media caption (under 200 characters) and 5 highly relevant hashtags. 
-    The tone should be exciting and mysterious. Output only a JSON object.
+    The tone should be exciting and mysterious. Output only a JSON object following this schema:
+    {{
+        "caption": "Your compelling caption text here.",
+        "hashtags": ["#AIReel", "#GenerativeAI", "#YourThemeTag", "#AnotherTag", "#FifthTag"]
+    }}
     """
     
-    response = client.models.generate_content(
-        model=config['gemini_model_name'],
-        contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json")
-    )
-
+    print("\nCalling Gemini for Caption and Hashtag Generation...")
     try:
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json")
+        )
         caption_data = json.loads(response.text)
+        print("Caption generated successfully.")
         return caption_data
-    except json.JSONDecodeError:
+    except Exception as e:
+        print(f"Error generating caption: {e}. Using fallback.")
         return {"caption": f"Check out this amazing short! Theme: {story_data['theme']}", "hashtags": ["#AIReel", "#GenerativeAI", "#Shorts"]}

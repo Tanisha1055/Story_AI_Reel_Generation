@@ -4,3 +4,4 @@ pyyaml
 moviepy
 Pillow
 python-dotenv  
+streamlit
