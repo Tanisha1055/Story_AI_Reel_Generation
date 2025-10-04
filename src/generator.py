@@ -156,7 +156,7 @@ def generate_video_clip(config, scene_id, frame_path, motion_prompt):
     from moviepy import ImageClip
     # Create a simple clip from the static frame for demonstration
     clip = ImageClip(frame_path, duration=duration)
-    clip.write_videofile(clip_filename, fps=24, verbose=False, logger=None)
+    clip.write_videofile(clip_filename, fps=24, logger=None)
     
     print(f"Mock video clip saved: {clip_filename}")
     return clip_filename
