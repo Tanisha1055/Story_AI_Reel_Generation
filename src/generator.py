@@ -153,7 +153,7 @@ def generate_video_clip(config, scene_id, frame_path, motion_prompt):
     #     f.write(response.content) 
     
     # --- MOCK VIDEO CREATION (REQUIRES MOVIEPY - FOR DEMO/TESTING ONLY) ---
-    from moviepy.editor import ImageClip
+    from moviepy import ImageClip
     # Create a simple clip from the static frame for demonstration
     clip = ImageClip(frame_path, duration=duration)
     clip.write_videofile(clip_filename, fps=24, verbose=False, logger=None)

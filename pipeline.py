@@ -1,6 +1,8 @@
 
 import argparse
 import os
+from dotenv import load_dotenv
+load_dotenv() 
 from src.utils import load_config, setup_directories
 from src import generator
 from src import media_processor

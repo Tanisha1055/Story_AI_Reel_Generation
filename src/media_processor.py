@@ -1,7 +1,7 @@
 
 import os
-from moviepy.editor import VideoFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
-from moviepy.config import change_settings # FFMPEG path configuration might be needed
+from moviepy import VideoFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
+
 
 # Optional: Set FFMPEG path if moviepy can't find it automatically
 # change_settings({"FFMPEG_BINARY": "/usr/local/bin/ffmpeg"}) 
