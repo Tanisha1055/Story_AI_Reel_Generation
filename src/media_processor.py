@@ -11,27 +11,37 @@ os.environ["FFMPEG_BINARY"] = "C:/ffmpeg/bin/ffmpeg.exe"
 def generate_dynamic_video_clip(config, scene_id, frame_path, motion_prompt):
     """Generates a dynamic video clip from a static frame using moviepy motion effects."""
     print(f"Generating dynamic clip for Scene {scene_id} with motion: '{motion_prompt}'...")
-    
-    duration = config['scene_duration_seconds']
+
     clip_filename = os.path.join(config['output_dir'], f"scene_{scene_id}_clip.mp4")
 
-    # Start with the static image as a clip
-    clip = ImageClip(frame_path, duration=duration).set_fps(24)
-    width, height = clip.size
+    try:
+        # Create a static image clip
+        duration = config.get('scene_duration_seconds', 5)
+        clip = ImageClip(frame_path, duration=duration)
+        clip.fps = 24  # ✅ safe and compatible for all MoviePy versions
 
-    # ... (motion logic remains the same) ...
+        width, height = clip.size
 
-    # Write the video file with explicit codec for robust MP4 creation
-    clip.write_videofile(
-        clip_filename, 
-        fps=24, 
-        logger=None, 
-        audio=False, 
-        codec='libx264' # <-- CRITICAL: Specify MP4 codec explicitly
-    ) 
-    
-    print(f"Dynamic video clip saved: {clip_filename}")
-    return clip_filename
+        # (Optional) Apply light zoom or motion if needed
+        # For example: simulate a push-in (Ken Burns effect)
+        clip = clip.fx(vfx.zoom_in, factor=1.05) if hasattr(vfx, "zoom_in") else clip
+
+        # Write the video file
+        clip.write_videofile(
+            clip_filename,
+            fps=24,
+            codec='libx264',  # ✅ ensures MP4 compatibility
+            audio=False,
+            logger=None
+        )
+
+        print(f"✅ Dynamic video clip saved: {clip_filename}")
+        return clip_filename
+
+    except Exception as e:
+        raise RuntimeError(f"Video clip generation failed for Scene {scene_id}: {e}")
+
+
 
 # --- STAGE 6.1: Final Reel Assembly (MoviePy) ---
 def assemble_final_reel(config, clip_paths, story_data):
