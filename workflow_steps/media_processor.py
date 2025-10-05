@@ -10,6 +10,8 @@ from moviepy import VideoFileClip, concatenate_videoclips
 def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any], client: APIClient) -> Dict[str, Any]:
     """
     Step 2: Chains SDXL image generation to Seedance video generation.
+    FIX: Ensure the output from client.run_model is handled safely regardless
+    of whether it returns a dict, list, or FileOutput object.
     """
     print("\n--- 2. Image and Video Generation Chain (SDXL -> Seedance) ---")
     
@@ -25,12 +27,27 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
         
         char_output = client.run_model(model_name=config['IMAGE_CHARACTER_MODEL'], model_input_data=char_input)
         
-        # SDXL returns a list of FileOutput objects under the 'output' key from the API client
-        raw_output_list = char_output.get('output', [])
+        # =========================================================================
+        # ✅ FIX: Robustly extract output from char_output
+        # =========================================================================
+        if isinstance(char_output, dict):
+            # Normal case: client.run_model returns {'output': [...]}
+            raw_output = char_output.get('output')
+            if raw_output is None:
+                raw_output_list = []
+            elif not isinstance(raw_output, list):
+                raw_output_list = [raw_output]
+            else:
+                raw_output_list = raw_output
+        elif isinstance(char_output, list):
+            # Case where client.run_model bypasses the {'output':...} wrapper
+            raw_output_list = char_output
+        else:
+            # Case where client.run_model returns a single FileOutput object
+            raw_output_list = [char_output] if hasattr(char_output, "url") else []
+        # =========================================================================
         
-        # =========================================================================
-        # ✅ FIX: Robust Image URL Extraction
-        # =========================================================================
+        # Robust URL Extraction (Operating on the guaranteed list: raw_output_list)
         char_url = None
         if raw_output_list:
             first_output = raw_output_list[0]
@@ -39,11 +56,9 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
             elif isinstance(first_output, dict):
                 char_url = first_output.get("url")
             elif hasattr(first_output, "url"):
-                # Safely get the .url attribute from FileOutput object
                 char_url = getattr(first_output, "url", None)
             else:
                 char_url = None
-        # =========================================================================
         
         if not char_url:
             print("🚨 ERROR: SDXL did not return a valid image URL. Skipping scene.")
@@ -55,7 +70,6 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
         # --- 2b. Video Clip Generation (Seedance-1-pro) ---
         seedance_input = {
             "prompt": scene['scene_description'],
-            # char_url is now confirmed to be a string URL
             "image": char_url, 
             "duration": CLIP_DURATION,
             "resolution": config['VIDEO_CONFIG']['resolution'] 
@@ -63,17 +77,32 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
         
         clip_output = client.run_model(model_name=VIDEO_MODEL, model_input_data=seedance_input)
         
-        # Seedance output (video) also returns a list
-        raw_video_list = clip_output.get('output', [])
+        # =========================================================================
+        # ✅ FIX: Robustly extract output from clip_output
+        # =========================================================================
+        if isinstance(clip_output, dict):
+            raw_video_output = clip_output.get('output')
+            if raw_video_output is None:
+                raw_video_list = []
+            elif not isinstance(raw_video_output, list):
+                raw_video_list = [raw_video_output]
+            else:
+                raw_video_list = raw_video_output
+        elif isinstance(clip_output, list):
+            raw_video_list = clip_output
+        else:
+            raw_video_list = [clip_output] if hasattr(clip_output, "url") else []
+        # =========================================================================
         
         # =========================================================================
-        # ✅ FIX: Robust Video URL Extraction
+        # ✅ FIX: Robust Video URL Extraction (Operating on the guaranteed list)
         # =========================================================================
         final_video_url = None
         
         if raw_video_list:
-            # 💡 OPTIONAL SAFETY: Print the raw output for debugging
-            print(f"   DEBUG: raw_video_list -> {raw_video_list}")
+            # 💡 Print the now-guaranteed list output for debugging
+            print(f"   DEBUG: clip_output type -> {type(clip_output)}")
+            print(f"   DEBUG: raw_video_list -> {raw_video_list}")
 
             first_output = raw_video_list[0]
             if isinstance(first_output, str):
@@ -95,14 +124,12 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
         scene['video_url'] = final_video_url
         print(f"    - Final Video Clip URL: {final_video_url}")
 
-    # Return the story data, now augmented with the 'character_image_url' and 'video_url' for each scene
     return story_data
 
 
 def combine_and_finalize_reel(story_data: Dict[str, Any], config: Dict[str, Any]) -> str:
     """
     Downloads all generated clips and combines them into a final reel using MoviePy.
-    (Includes the previous fix for the key mismatch from 'video_clip_url' to 'video_url')
     """
     print("\n--- 3. Final Reel Assembly and Compliance Check ---")
     
@@ -119,11 +146,10 @@ def combine_and_finalize_reel(story_data: Dict[str, Any], config: Dict[str, Any]
     for i, scene in enumerate(scenes_to_process):
         clip_filename = f"scene_{i+1}.mp4"
         
-        # Retrieve video URL using the correct key 'video_url'
+        # Retrieve video URL using the correct key 'video_url' (Key Mismatch Fix retained)
         video_url = scene.get('video_url')
 
         if not video_url:
-            # This handles scenes that were skipped in step 2 (due to API error)
             print(f"   Skipping Scene {i+1}: Missing video_url.")
             continue
             
