@@ -5,3 +5,5 @@ moviepy
 Pillow
 python-dotenv  
 streamlit
+replicate
+pydantic
