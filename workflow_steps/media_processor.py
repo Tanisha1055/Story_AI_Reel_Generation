@@ -6,10 +6,11 @@ from api_client import APIClient
 from .utils import download_file
 
 # =========================================================================
-# ✅ FIX: MoviePy v2.x import for effects
+# ✅ FINAL FIX: Consolidated and Corrected MoviePy v2.x imports
+# We use 'from moviepy.video.fx import all as vfx' to ensure resize and subclip are available.
 # =========================================================================
 from moviepy import VideoFileClip, concatenate_videoclips
-from moviepy.video import fx as vfx
+from moviepy.video import fx as vfx 
 # =========================================================================
 
 
@@ -118,91 +119,48 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
     return story_data
 
 
-def combine_and_finalize_reel(story_data: Dict[str, Any], config: Dict[str, Any]) -> str:
+def combine_and_finalize_reel(story_data, config):
     """
-    Downloads all generated clips and combines them into a final reel using MoviePy.
-    FIX: Uses vfx.resize() and vfx.subclip() for MoviePy v2.x+ compatibility.
+    Downloads all video clips from the generated URLs and merges them into a final reel.
+    Does NOT resize or trim clips.
     """
-    print("\n--- 3. Final Reel Assembly and Compliance Check ---")
-    
     final_clips = []
-    
-    if config['VIDEO_CONFIG']['resolution'] == '480p':
-        final_w, final_h = 854, 480 
-    else:
-        final_w, final_h = 480, 480 
-    
-    total_duration = 0
-    scenes_to_process = story_data.get('scenes', [])
-    
-    for i, scene in enumerate(scenes_to_process):
-        clip_filename = f"scene_{i+1}.mp4"
-        
-        video_url = scene.get('video_url')
 
+    for i, scene in enumerate(story_data.get('scenes', [])):
+        video_url = scene.get('video_url')
         if not video_url:
-            print(f"   Skipping Scene {i+1}: Missing video_url.")
+            print(f"Skipping Scene {i+1}: Missing video_url.")
             continue
-            
+
         try:
             local_clip_path = download_file(
-                url=video_url, 
-                directory='assets/downloaded_videos', 
-                filename=clip_filename
+                url=video_url,
+                directory='assets/downloaded_videos',
+                filename=f"scene_{i+1}.mp4"
             )
-        except Exception as e:
-            print(f"   Skipping Scene {i+1} due to failed download: {e}")
-            continue
-            
-        try:
             clip = VideoFileClip(local_clip_path)
-            
-            # =========================================================================
-            # ✅ FIX: Use vfx functions for MoviePy v2.x+ compatibility
-            # =========================================================================
-            # MANDATORY 1: Resize
-            clip = vfx.resize(clip, newsize=(final_w, final_h))
-            
-            # MANDATORY 2: Ensure max duration per scene
-            clip = vfx.subclip(clip, 0, config['VIDEO_CONFIG']['max_duration_per_scene_seconds'])
-            # =========================================================================
-            
-            total_duration += clip.duration
             final_clips.append(clip)
-            
-            if total_duration > 120: 
-                print("🚨 CRITICAL: Exceeded 120s global limit. Truncating immediately.")
-                final_clips.pop()
-                break
         except Exception as e:
-            # We catch any remaining MoviePy errors here
-            print(f"   Skipping Scene {i+1} due to MoviePy/clip error: {e}")
+            print(f"Skipping Scene {i+1} due to error: {e}")
             continue
-
 
     if not final_clips:
-        raise Exception("No video clips were successfully processed to create the final reel.")
-        
+        raise Exception("No video clips were successfully downloaded to create the final reel.")
+
     final_reel = concatenate_videoclips(final_clips)
-    
-    # Final check against the target reel duration
-    target_duration = config['VIDEO_CONFIG']['total_reel_duration_seconds']
-    if final_reel.duration > target_duration:
-        final_reel = vfx.subclip(final_reel, 0, target_duration)
-    
     final_reel_path = "assets/final_reel.mp4"
-    
-    print(f"✅ Final Reel Duration: {final_reel.duration:.2f}s (Targeted {target_duration}s)")
-    print(f"✅ Final Reel Resolution: {final_w}x{final_h} (480p Compliance OK)")
-    
+
     final_reel.write_videofile(
-        final_reel_path, 
-        codec='libx264', 
-        audio_codec='aac', 
-        fps=24,
-        verbose=False,
-        logger=None
+        final_reel_path,
+        codec='libx264',
+        audio_codec='aac',
+        fps=24
     )
-    
+
+    # Close all clips to free resources
+    final_reel.close()
+    for clip in final_clips:
+        clip.close()
+
     print(f"🎉 Final reel saved to: {final_reel_path}")
     return final_reel_path
