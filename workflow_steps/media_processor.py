@@ -4,14 +4,19 @@ from typing import Dict, Any, List
 from api_client import APIClient
 # Assuming .utils has download_file
 from .utils import download_file
+
+# =========================================================================
+# ✅ FIX: MoviePy v2.x import for effects
+# =========================================================================
 from moviepy import VideoFileClip, concatenate_videoclips
+from moviepy.video import fx as vfx
+# =========================================================================
 
 
 def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any], client: APIClient) -> Dict[str, Any]:
     """
     Step 2: Chains SDXL image generation to Seedance video generation.
-    FIX: Ensure the output from client.run_model is handled safely regardless
-    of whether it returns a dict, list, or FileOutput object.
+    FIX: Robustly handle API client output (dict, list, or FileOutput object).
     """
     print("\n--- 2. Image and Video Generation Chain (SDXL -> Seedance) ---")
     
@@ -27,11 +32,8 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
         
         char_output = client.run_model(model_name=config['IMAGE_CHARACTER_MODEL'], model_input_data=char_input)
         
-        # =========================================================================
-        # ✅ FIX: Robustly extract output from char_output
-        # =========================================================================
+        # Robustly extract output from char_output
         if isinstance(char_output, dict):
-            # Normal case: client.run_model returns {'output': [...]}
             raw_output = char_output.get('output')
             if raw_output is None:
                 raw_output_list = []
@@ -40,14 +42,11 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
             else:
                 raw_output_list = raw_output
         elif isinstance(char_output, list):
-            # Case where client.run_model bypasses the {'output':...} wrapper
             raw_output_list = char_output
         else:
-            # Case where client.run_model returns a single FileOutput object
             raw_output_list = [char_output] if hasattr(char_output, "url") else []
-        # =========================================================================
         
-        # Robust URL Extraction (Operating on the guaranteed list: raw_output_list)
+        # Robust URL Extraction
         char_url = None
         if raw_output_list:
             first_output = raw_output_list[0]
@@ -77,9 +76,7 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
         
         clip_output = client.run_model(model_name=VIDEO_MODEL, model_input_data=seedance_input)
         
-        # =========================================================================
-        # ✅ FIX: Robustly extract output from clip_output
-        # =========================================================================
+        # Robustly extract output from clip_output
         if isinstance(clip_output, dict):
             raw_video_output = clip_output.get('output')
             if raw_video_output is None:
@@ -92,16 +89,12 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
             raw_video_list = clip_output
         else:
             raw_video_list = [clip_output] if hasattr(clip_output, "url") else []
-        # =========================================================================
         
-        # =========================================================================
-        # ✅ FIX: Robust Video URL Extraction (Operating on the guaranteed list)
-        # =========================================================================
+        # Robust Video URL Extraction
         final_video_url = None
         
         if raw_video_list:
-            # 💡 Print the now-guaranteed list output for debugging
-            print(f"   DEBUG: clip_output type -> {type(clip_output)}")
+            print(f"   DEBUG: clip_output type -> {type(clip_output)}")
             print(f"   DEBUG: raw_video_list -> {raw_video_list}")
 
             first_output = raw_video_list[0]
@@ -110,11 +103,9 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
             elif isinstance(first_output, dict):
                 final_video_url = first_output.get("url")
             elif hasattr(first_output, "url"):
-                # Safely get the .url attribute from FileOutput object
                 final_video_url = getattr(first_output, "url", None)
             else:
                 final_video_url = None
-        # =========================================================================
 
         if not final_video_url:
             print(f"🚨 ERROR: Video model ({VIDEO_MODEL}) did not return a valid video URL. Skipping scene.")
@@ -130,6 +121,7 @@ def generate_and_chain_media(story_data: Dict[str, Any], config: Dict[str, Any],
 def combine_and_finalize_reel(story_data: Dict[str, Any], config: Dict[str, Any]) -> str:
     """
     Downloads all generated clips and combines them into a final reel using MoviePy.
+    FIX: Uses vfx.resize() and vfx.subclip() for MoviePy v2.x+ compatibility.
     """
     print("\n--- 3. Final Reel Assembly and Compliance Check ---")
     
@@ -146,7 +138,6 @@ def combine_and_finalize_reel(story_data: Dict[str, Any], config: Dict[str, Any]
     for i, scene in enumerate(scenes_to_process):
         clip_filename = f"scene_{i+1}.mp4"
         
-        # Retrieve video URL using the correct key 'video_url' (Key Mismatch Fix retained)
         video_url = scene.get('video_url')
 
         if not video_url:
@@ -154,7 +145,6 @@ def combine_and_finalize_reel(story_data: Dict[str, Any], config: Dict[str, Any]
             continue
             
         try:
-            # Download the real MP4 file for combining
             local_clip_path = download_file(
                 url=video_url, 
                 directory='assets/downloaded_videos', 
@@ -167,8 +157,15 @@ def combine_and_finalize_reel(story_data: Dict[str, Any], config: Dict[str, Any]
         try:
             clip = VideoFileClip(local_clip_path)
             
-            # MANDATORY: Resize and ensure max duration per scene
-            clip = clip.resize(newsize=(final_w, final_h)).subclip(0, config['VIDEO_CONFIG']['max_duration_per_scene_seconds'])
+            # =========================================================================
+            # ✅ FIX: Use vfx functions for MoviePy v2.x+ compatibility
+            # =========================================================================
+            # MANDATORY 1: Resize
+            clip = vfx.resize(clip, newsize=(final_w, final_h))
+            
+            # MANDATORY 2: Ensure max duration per scene
+            clip = vfx.subclip(clip, 0, config['VIDEO_CONFIG']['max_duration_per_scene_seconds'])
+            # =========================================================================
             
             total_duration += clip.duration
             final_clips.append(clip)
@@ -178,6 +175,7 @@ def combine_and_finalize_reel(story_data: Dict[str, Any], config: Dict[str, Any]
                 final_clips.pop()
                 break
         except Exception as e:
+            # We catch any remaining MoviePy errors here
             print(f"   Skipping Scene {i+1} due to MoviePy/clip error: {e}")
             continue
 
@@ -190,7 +188,7 @@ def combine_and_finalize_reel(story_data: Dict[str, Any], config: Dict[str, Any]
     # Final check against the target reel duration
     target_duration = config['VIDEO_CONFIG']['total_reel_duration_seconds']
     if final_reel.duration > target_duration:
-        final_reel = final_reel.subclip(0, target_duration)
+        final_reel = vfx.subclip(final_reel, 0, target_duration)
     
     final_reel_path = "assets/final_reel.mp4"
     
