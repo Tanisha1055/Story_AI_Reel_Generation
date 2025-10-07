@@ -1,9 +1,9 @@
 
-# 🎥 AI Story Video Generator: Multi-Model Reel Automation
+# AI Story Video Generator: Multi-Model Reel Automation
 
 This project implements an advanced, chained Generative AI workflow to automatically create a short video reel from a simple theme. The pipeline orchestrates four different state-of-the-art AI models—an LLM for scripting, a multi-stage image pipeline for visual assets, and a dedicated model for video generation—followed by a final media processing stage.
 
-## ✨ Expected Deliverables Showcase
+## Expected Deliverables Showcase
 
 | Deliverable | Description | Location / Implementation Detail |
 | :--- | :--- | :--- |
@@ -14,7 +14,7 @@ This project implements an advanced, chained Generative AI workflow to automatic
 
 -----
 
-## ⚙️ Workflow Architecture and Design
+## Workflow Architecture and Design
 
 The automation is structured as a sequential, three-stage pipeline to ensure consistency and quality across the final reel.
 
@@ -37,7 +37,7 @@ The automation is structured as a sequential, three-stage pipeline to ensure con
 
 -----
 
-## 🚀 How to Run the Project
+## How to Run the Project
 
 Follow these steps to set up the environment and run the end-to-end automation.
 
